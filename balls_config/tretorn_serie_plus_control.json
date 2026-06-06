@@ -1,0 +1,42 @@
+{
+    "circle": {
+        "min_radius": 400,
+        "max_radius": 700,
+        "crop_size": 1500
+    },
+
+    "upper_line": {
+        "upper_limit": 0.1,
+        "lower_limit": 0.25,
+        "left_limit": 0.35,
+        "right_limit": 0.65
+    },
+
+    "lower_line": {
+        "upper_limit": 0.75,
+        "lower_limit": 0.9,
+        "left_limit": 0.35,
+        "right_limit": 0.65
+    },
+
+    "logo": {
+        "upper_limit": 0.25,
+        "lower_limit": 0.75,
+        "left_limit": 0.15,
+        "right_limit": 0.85
+    },
+
+    "upper_patch": {
+        "upper_limit": 0.2,
+        "lower_limit": 0.3,
+        "left_limit": 0.4,
+        "right_limit": 0.6
+    },
+
+    "lower_patch": {
+        "upper_limit": 0.66,
+        "lower_limit": 0.76,
+        "left_limit": 0.4,
+        "right_limit": 0.6
+    }
+}
