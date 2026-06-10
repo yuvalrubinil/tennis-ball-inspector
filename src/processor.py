@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-
 import json
 
 
@@ -174,8 +173,28 @@ class Processor:
             borderMode=cv2.BORDER_CONSTANT, 
             borderValue=[0, 0, 0]
         )
+
+        h, w = upper_seam_line_mask.shape[:2]
+        straightened_upper_seam = cv2.warpAffine(
+            upper_seam_line_mask, 
+            rot_matrix, 
+            (w, h), 
+            flags=cv2.INTER_CUBIC, 
+            borderMode=cv2.BORDER_CONSTANT, 
+            borderValue=[0, 0, 0]
+        )
+
+        h, w = lower_seam_line_mask.shape[:2]
+        straightened_lower_seam = cv2.warpAffine(
+            lower_seam_line_mask, 
+            rot_matrix, 
+            (w, h), 
+            flags=cv2.INTER_CUBIC, 
+            borderMode=cv2.BORDER_CONSTANT, 
+            borderValue=[0, 0, 0]
+        )
         
-        return straightened_image
+        return straightened_image, straightened_upper_seam, straightened_lower_seam
     
 
     def logo_roi(self, cropped_image):
@@ -186,7 +205,7 @@ class Processor:
         logo_left_limit  = int(w * l_left)
         logo_right_limit = int(w * l_right)
 
-        border_mask = np.zeros_like(cropped_image)
+        border_mask = np.zeros((h, w), dtype=np.uint8)
         border_mask[logo_upper_limit:logo_lower_limit, logo_left_limit:logo_right_limit] = 255
 
         # convert to grayscale blurred
@@ -199,34 +218,98 @@ class Processor:
         # apply only for the ROI
         logo_mask = cv2.bitwise_and(logo_mask, border_mask)
         
-        # morphological close: dilation -> erosion for clearer logo letters.
+        # morphological close: dilation -> erosion for clearer logo letters
         vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 13))
         clean_logo_mask = cv2.morphologyEx(logo_mask, cv2.MORPH_CLOSE, vertical_kernel)
         
         return clean_logo_mask
 
 
-    def patches_roi(self, cropped_image):
+    def segment_individual_characters(self, clean_logo_mask):
+        """
+        returns a list of isolated binary masks for each connected component 
+        """
+        # connected components analysis
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(clean_logo_mask)
+        components = []
+        for i in range(1, num_labels):
+            components.append({
+                'id': i,
+                'x': stats[i, cv2.CC_STAT_LEFT],
+                'y': stats[i, cv2.CC_STAT_TOP],
+                'w': stats[i, cv2.CC_STAT_WIDTH],
+                'h': stats[i, cv2.CC_STAT_HEIGHT],
+                'area': stats[i, cv2.CC_STAT_AREA],
+                'centroid': centroids[i]
+            })
+            
+        # filter out noise (area > 300 pixels)
+        valid_components = [c for c in components if c['area'] > 300]
+        
+        # sort components 
+        valid_components.sort(key=lambda c: c['y'])
+        sorted_components = []
+        current_row = []
+        if valid_components:
+            row_y = valid_components[0]['y']
+            for c in valid_components:
+                if c['y'] - row_y < 50:  # same row tolerance
+                    current_row.append(c)
+                else:
+                    current_row.sort(key=lambda item: item['x']) # sort row left-to-right
+                    sorted_components.extend(current_row)
+                    current_row = [c]
+                    row_y = c['y']
+            current_row.sort(key=lambda item: item['x'])
+            sorted_components.extend(current_row)
+
+        # generate isolated binary map for each component
+        character_masks = []
+        for comp in sorted_components:
+            char_mask = np.zeros_like(clean_logo_mask)
+            char_mask[labels == comp['id']] = 255
+            character_masks.append({
+                'mask': char_mask,
+                'bbox': (comp['x'], comp['y'], comp['w'], comp['h']),
+                'area': comp['area']
+            })
+            
+        return character_masks
+
+
+    def patch_roi(self, cropped_image):
         """
         Crops upper and lower patches from an image.
         """
         h, w = cropped_image.shape[:2]
         
-        u_up, u_low, u_left, u_right = self.config["upper_patch"].values()
-        upper_patch_upper_limit = int(u_up * h)
-        upper_patch_lower_limit = int(u_low * h)
-        upper_patch_left_limit = int(u_left * w)
-        upper_patch_right_limit = int(u_right * w)
-        
-        l_up, l_low, l_left, l_right = self.config["lower_patch"].values()
-        lower_patch_upper_limit = int(l_up * h)
-        lower_patch_lower_limit = int(l_low * h)
-        lower_patch_left_limit = int(l_left * w)
-        lower_patch_right_limit = int(l_right * w)
+        p_up, p_low, p_left, p_right = self.config["patch"].values()
+        lower_patch_upper_limit = int(p_up * h)
+        lower_patch_lower_limit = int(p_low * h)
+        lower_patch_left_limit = int(p_left * w)
+        lower_patch_right_limit = int(p_right * w)
         
         # slicing
-        upper_patch = cropped_image[upper_patch_upper_limit:upper_patch_lower_limit, upper_patch_left_limit:upper_patch_right_limit]
-        lower_patch = cropped_image[lower_patch_upper_limit:lower_patch_lower_limit, lower_patch_left_limit:lower_patch_right_limit]
+        patch = cropped_image[lower_patch_upper_limit:lower_patch_lower_limit, lower_patch_left_limit:lower_patch_right_limit]
         
-        return upper_patch, lower_patch
+        return patch
+
+
+    def __call__(self, img_path):
+        img = cv2.imread(img_path)
+        # focus on the ball
+        a, b, r = self.detect_circle(img)
+        cropped_ball = self.crop_ball(img, center=(a, b))
+
+        # rotate horizontally
+        upper_seam_mask, lower_seam_mask = self.seam_lines_roi(cropped_ball)
+        cropped_ball, upper_seam_mask, lower_seam_mask = self.rotate_ball(cropped_ball, upper_seam_mask, lower_seam_mask)
+
+        # get roi's
+        logo_mask = self.logo_roi(cropped_ball)
+        characters = self.segment_individual_characters(logo_mask)
+        patch = self.patch_roi(cropped_ball)
+
+        return cropped_ball, r, upper_seam_mask, lower_seam_mask, characters, patch
+
 

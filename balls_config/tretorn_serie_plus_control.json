@@ -26,17 +26,10 @@
         "right_limit": 0.85
     },
 
-    "upper_patch": {
-        "upper_limit": 0.2,
-        "lower_limit": 0.3,
-        "left_limit": 0.4,
-        "right_limit": 0.6
-    },
-
-    "lower_patch": {
+    "patch": {
         "upper_limit": 0.66,
         "lower_limit": 0.76,
-        "left_limit": 0.4,
-        "right_limit": 0.6
+        "left_limit": 0.35,
+        "right_limit": 0.65
     }
 }
