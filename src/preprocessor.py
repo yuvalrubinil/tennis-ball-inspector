@@ -3,7 +3,7 @@ import numpy as np
 import json
 
 
-class Processor:
+class Preprocessor:
 
     def __init__(self, config_path):
         with open(config_path, 'r') as config:
@@ -227,54 +227,56 @@ class Processor:
 
     def segment_individual_characters(self, clean_logo_mask):
         """
-        returns a list of isolated binary masks for each connected component 
+        returns a list of dicts containing the mask, bbox, and centroid for each character
         """
         # connected components analysis
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(clean_logo_mask)
-        components = []
-        for i in range(1, num_labels):
-            components.append({
-                'id': i,
-                'x': stats[i, cv2.CC_STAT_LEFT],
-                'y': stats[i, cv2.CC_STAT_TOP],
-                'w': stats[i, cv2.CC_STAT_WIDTH],
-                'h': stats[i, cv2.CC_STAT_HEIGHT],
-                'area': stats[i, cv2.CC_STAT_AREA],
-                'centroid': centroids[i]
-            })
-            
-        # filter out noise (area > 300 pixels)
-        valid_components = [c for c in components if c['area'] > 300]
         
-        # sort components 
+        # filter out noise (area > 300) 
+        valid_components = []
+        for i in range(1, num_labels):
+            area = stats[i, cv2.CC_STAT_AREA]
+            if area > 300: 
+                valid_components.append({
+                    'id': i,
+                    'x': stats[i, cv2.CC_STAT_LEFT],
+                    'y': stats[i, cv2.CC_STAT_TOP],
+                    'w': stats[i, cv2.CC_STAT_WIDTH],
+                    'h': stats[i, cv2.CC_STAT_HEIGHT],
+                    'centroid': centroids[i]
+                })
+        
+        # sort components
         valid_components.sort(key=lambda c: c['y'])
         sorted_components = []
         current_row = []
+        
         if valid_components:
             row_y = valid_components[0]['y']
             for c in valid_components:
                 if c['y'] - row_y < 50:  # same row tolerance
                     current_row.append(c)
                 else:
-                    current_row.sort(key=lambda item: item['x']) # sort row left-to-right
+                    current_row.sort(key=lambda item: item['x'])
                     sorted_components.extend(current_row)
                     current_row = [c]
                     row_y = c['y']
             current_row.sort(key=lambda item: item['x'])
             sorted_components.extend(current_row)
 
-        # generate isolated binary map for each component
-        character_masks = []
+        # final masks and thier metadata
+        character_results = []
         for comp in sorted_components:
             char_mask = np.zeros_like(clean_logo_mask)
             char_mask[labels == comp['id']] = 255
-            character_masks.append({
+            
+            character_results.append({
                 'mask': char_mask,
                 'bbox': (comp['x'], comp['y'], comp['w'], comp['h']),
-                'area': comp['area']
+                'centroid': comp['centroid']
             })
             
-        return character_masks
+        return character_results
 
 
     def patch_roi(self, cropped_image):
