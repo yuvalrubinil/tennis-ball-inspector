@@ -54,6 +54,50 @@ class FeatureExtractor:
     def __call__(self, image_path):
         # getting all the roi
         cropped_ball, r, upper_seam_mask, lower_seam_mask, characters, patch = self.processor(image_path)
+
+        r_ratio = r / self.template_r
+        
+        # extracting all the roi color signatures
+        patch_color_signature = self.color_extractor(patch)
+        upper_seam_color_signature = self.color_extractor(cropped_ball, upper_seam_mask)
+        lower_seam_color_signature = self.color_extractor(cropped_ball, lower_seam_mask)
+
+        # calculating color signature differences
+        patch_color_diff = cv2.compareHist(self.template_patch_color_signature, patch_color_signature, cv2.HISTCMP_BHATTACHARYYA)
+        upper_seam_color_diff = cv2.compareHist(self.template_upper_seam_color_signature, upper_seam_color_signature, cv2.HISTCMP_BHATTACHARYYA)
+        lower_seam_color_diff = cv2.compareHist(self.template_lower_seam_color_signature, lower_seam_color_signature, cv2.HISTCMP_BHATTACHARYYA)
+        
+        chars_structural_diff = []
+        chars_color_diff = []
+        min_char_count = min(len(self.template_characters), len(characters))
+        valid_char_count = len(self.template_characters) == len(characters)
+        for i in range(min_char_count):
+            template_char, char = self.template_characters[i], characters[i]
+
+            # calculating color signature difference
+            char_color_signature = self.color_extractor(cropped_ball, char['mask'])
+            color_diff = cv2.compareHist(self.template_characters_color_signatures[i], char_color_signature, cv2.HISTCMP_BHATTACHARYYA)
+            chars_color_diff.append(color_diff)
+
+            # calculating char starctual difference
+            char_translated_mask = translate_and_crop_char(template_char, char, cropped_ball)
+            template_char_mask = template_char['cropped_mask']
+            char_starctual_diff_map = np.logical_xor(template_char_mask, char_translated_mask)
+
+            # morphological erosion filter
+            kernel = np.ones((12, 12), np.uint8)
+            char_starctual_diff_filtered = cv2.erode(char_starctual_diff_map.astype(np.uint8), kernel, iterations=1).astype(bool)
+            
+            # normalizing
+            char_structural_diff = np.sum(char_starctual_diff_filtered) / char_starctual_diff_filtered.size
+            chars_structural_diff.append(char_structural_diff)
+
+        return r_ratio, patch_color_diff, upper_seam_color_diff, lower_seam_color_diff, valid_char_count, chars_color_diff, chars_structural_diff
+    
+
+    def visualized_features(self, image_path):
+        # getting all the roi
+        cropped_ball, r, upper_seam_mask, lower_seam_mask, characters, patch = self.processor(image_path)
         
         # extracting all the roi color signatures
         patch_color_signature = self.color_extractor(patch)
@@ -65,21 +109,20 @@ class FeatureExtractor:
             char_color_signature = self.color_extractor(cropped_ball, char['mask'])
             chars_color_signatures.append(char_color_signature)
 
-        chars_structural_diff = []
+        chars_cropped = []
         min_char_count = min(len(self.template_characters), len(characters))
-        
+        valid_char_count = len(self.template_characters) == len(characters)
         for i in range(min_char_count):
             # calculating char starctual difference
             template_char, char = self.template_characters[i], characters[i]
             char_translated_mask = translate_and_crop_char(template_char, char, cropped_ball)
-            template_char_mask = template_char['cropped_mask']
+            chars_cropped.append(char_translated_mask)
 
-            char_starctual_diff = np.logical_xor(template_char_mask, char_translated_mask)
+        return r, patch_color_signature, upper_seam_color_signature, lower_seam_color_signature, valid_char_count, chars_color_signatures, chars_cropped
+    
 
-            # morphological erosion filter
-            kernel = np.ones((12, 12), np.uint8)
-            char_starctual_diff_filtered = cv2.erode(char_starctual_diff.astype(np.uint8), kernel, iterations=1).astype(bool)
-            chars_structural_diff.append(char_starctual_diff_filtered)
+    def __enter__(self):
+        return self
 
-        return r, patch_color_signature, upper_seam_color_signature, lower_seam_color_signature, chars_color_signatures, chars_structural_diff
-
+    def __exit__(self, exc_type, exc_value, traceback):
+        pass

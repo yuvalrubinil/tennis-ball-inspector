@@ -42,7 +42,7 @@ def __call__(self, image_path):
         return patch_color_diff, upper_seam_color_diff, lower_seam_color_diff, chars_color_diff, chars_structural_diff
 
 """
-
+import cv2
 import json
 from feature_extractor import FeatureExtractor
 
@@ -57,6 +57,7 @@ class VerdictHead:
             self.config = json.load(config)
 
     def __call__(self, image_path):
-        r, patch_color_signature, upper_seam_color_signature, lower_seam_color_signature, chars_color_signatures, chars_structural_diff = self.feature_extractor(image_path)
+        r_ratio, patch_color_diff, upper_seam_color_diff, lower_seam_color_diff, valid_char_count, chars_color_diff, chars_structural_diff = self.feature_extractor(image_path)
+        
         
         
