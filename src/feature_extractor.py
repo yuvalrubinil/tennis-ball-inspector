@@ -23,6 +23,15 @@ def translate_and_crop_char(template_char, char, cropped_ball):
     return cropped_aligned_char
 
 
+def hist_diff(h1, h2):
+    """
+    Calculates the normalized absolute difference between the histograms
+    """
+    abs_diff = np.abs(h1 - h2)
+    raw_sum = np.sum(abs_diff)
+    # dividing by 2.0 to normalize, max possible value is 2.0
+    return float(raw_sum / 2.0)
+
 class FeatureExtractor:
 
     def __init__(self, config_path, template_path):
@@ -63,9 +72,9 @@ class FeatureExtractor:
         lower_seam_color_signature = self.color_extractor(cropped_ball, lower_seam_mask)
 
         # calculating color signature differences
-        patch_color_diff = cv2.compareHist(self.template_patch_color_signature, patch_color_signature, cv2.HISTCMP_BHATTACHARYYA)
-        upper_seam_color_diff = cv2.compareHist(self.template_upper_seam_color_signature, upper_seam_color_signature, cv2.HISTCMP_BHATTACHARYYA)
-        lower_seam_color_diff = cv2.compareHist(self.template_lower_seam_color_signature, lower_seam_color_signature, cv2.HISTCMP_BHATTACHARYYA)
+        patch_color_diff = hist_diff(self.template_patch_color_signature, patch_color_signature)
+        upper_seam_color_diff = hist_diff(self.template_upper_seam_color_signature, upper_seam_color_signature)
+        lower_seam_color_diff = hist_diff(self.template_lower_seam_color_signature, lower_seam_color_signature)
         
         chars_structural_diff = []
         chars_color_diff = []
@@ -76,7 +85,7 @@ class FeatureExtractor:
 
             # calculating color signature difference
             char_color_signature = self.color_extractor(cropped_ball, char['mask'])
-            color_diff = cv2.compareHist(self.template_characters_color_signatures[i], char_color_signature, cv2.HISTCMP_BHATTACHARYYA)
+            color_diff = hist_diff(self.template_characters_color_signatures[i], char_color_signature)
             chars_color_diff.append(color_diff)
 
             # calculating char starctual difference

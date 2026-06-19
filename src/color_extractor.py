@@ -21,7 +21,7 @@ class ColorExtractor:
         lab_hist = cv2.calcHist([lab_img], [0, 2], mask, [100, 100], [0, 256, 0, 256])
         
         # 3. Normalizing
-        cv2.normalize(lab_hist, lab_hist, alpha=1, beta=0, norm_type=cv2.NORM_L2)
+        cv2.normalize(lab_hist, lab_hist, alpha=1, beta=0, norm_type=cv2.NORM_L1)
         
         return lab_hist
     

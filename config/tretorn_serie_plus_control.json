@@ -31,5 +31,13 @@
         "lower_limit": 0.76,
         "left_limit": 0.35,
         "right_limit": 0.65
+    },
+
+    "thresholds": {
+    "radius_tolarence": [0.95, 1.05],
+    "patch_color": 0.51,
+    "seam_lines_color": 0.46,
+    "char_color": 0.46,
+    "char_structur": 0.005
     }
 }
