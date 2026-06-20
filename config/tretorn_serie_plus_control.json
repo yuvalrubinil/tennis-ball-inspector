@@ -35,9 +35,9 @@
 
     "thresholds": {
     "radius_tolarence": [0.95, 1.05],
-    "patch_color": 0.51,
-    "seam_lines_color": 0.46,
-    "char_color": 0.46,
+    "patch_color": 0.02,
+    "seam_lines_color": 0.04,
+    "char_color": 0.035,
     "char_structur": 0.005
     }
 }

@@ -23,14 +23,20 @@ def translate_and_crop_char(template_char, char, cropped_ball):
     return cropped_aligned_char
 
 
-def hist_diff(h1, h2):
-    """
-    Calculates the normalized absolute difference between the histograms
-    """
-    abs_diff = np.abs(h1 - h2)
-    raw_sum = np.sum(abs_diff)
-    # dividing by 2.0 to normalize, max possible value is 2.0
-    return float(raw_sum / 2.0)
+def hist_diff(h1, h2, bins=100):
+    """True 2D Earth Mover's Distance between two (bins,bins) L1-normalized histograms."""
+    # Build (value, x, y) signature arrays required by cv2.EMD
+    def to_signature(h):
+        idx = np.argwhere(h > 0)
+        weights = h[idx[:, 0], idx[:, 1]].astype(np.float32)
+        sig = np.column_stack([weights, idx[:, 1].astype(np.float32), idx[:, 0].astype(np.float32)])
+        return sig.astype(np.float32)
+
+    sig1 = to_signature(h1)
+    sig2 = to_signature(h2)
+    dist, _, _ = cv2.EMD(sig1, sig2, cv2.DIST_L2)
+    max_dist = np.sqrt(2) * (bins - 1)  # = true worst-case EMD when total mass = 1.0
+    return float(np.clip(dist / max_dist, 0.0, 1.0))
 
 class FeatureExtractor:
 
