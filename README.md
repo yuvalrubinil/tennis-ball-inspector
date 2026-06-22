@@ -2,14 +2,14 @@
 
 ![LOGO](/figures/logo1.png)
 
-The Tennis Ball Inspector is a computer vision tool designed to assess the quality of a tennis ball by analyzing an image. It compares a given ball against a "template" image of a new, high-quality ball, evaluating various features such as size, color degradation, and the integrity of the printed logo.
+Tennis Ball Inspector is a computer vision pipeline designed to assess the quality of a tennis ball by analyzing an image. It compares a given ball against a "template" image of a new, high-quality ball, evaluating various features such as size, color degradation, and the integrity of the printed logo.
 
-## How It Works
+## Pipeline Overview
 
 The inspection process follows a multi-stage pipeline:
 
 1.  **Preprocessing**: The input image is processed to isolate and standardize the tennis ball.
-    *   **Ball Detection**: The ball is located using the Hough Circle Transform algorithm.
+    *   **Ball Detection**: The ball is located using the [Hough Circle Transform algorithm](https://www.youtube.com/watch?v=Ltqt24SQQoI).
     *   **Cropping**: The image is cropped to a square region centered on the detected ball.
     *   **Orientation Correction**: The seam lines of the ball are detected by analyzing saturation levels in the HSV color space. The angle of these lines is calculated, and the cropped image is rotated so the seams are horizontal, ensuring consistent orientation for comparison.
     *   **ROI Extraction**: Specific Regions of Interest (ROIs) are identified based on the configuration file:
@@ -29,21 +29,6 @@ The inspection process follows a multi-stage pipeline:
 
 4.  **Reporting**: A final report is generated in the console, indicating whether each feature passes or fails based on predefined thresholds. An optional visualization dashboard can also be displayed.
 
-## Project Structure
-
-```
-.
-├── main.py                   # Main script to run an inspection
-├── config/
-│   └── tretorn_serie_plus_control.json # JSON file for ROI coordinates and inspection thresholds
-├── images/                   # Directory for template and test images
-├── src/
-│   ├── ball_inspector.py     # Orchestrates the inspection and reports results
-│   ├── feature_extractor.py  # Extracts and compares features against a template
-│   ├── preprocessor.py       # Handles image detection, cropping, rotation, and ROI extraction
-│   └── color_extractor.py    # Generates color signatures from image regions
-└── figures/                  # (Optional) Directory for output figures
-```
 
 ## Configuration
 
