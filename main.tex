@@ -1,0 +1,701 @@
+\documentclass[11pt,a4paper]{article}
+
+% ---------- Packages ----------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{abstract}
+\usepackage{titlesec}
+
+\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{1em}{}
+
+% ---------- Code listing style ----------
+\definecolor{codebg}{rgb}{0.96,0.96,0.96}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{codegreen}{rgb}{0,0.5,0}
+
+\lstdefinestyle{pythonstyle}{
+    backgroundcolor=\color{codebg},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{blue},
+    stringstyle=\color{codepurple},
+    numberstyle=\tiny\color{codegray},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    frame=single,
+    language=Python
+}
+\lstset{style=pythonstyle}
+
+% Minimal JSON language definition for the listings package
+\lstdefinelanguage{json}{
+    basicstyle=\ttfamily\footnotesize,
+    showstringspaces=false,
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{codebg},
+    literate=
+     *{0}{{{\color{blue}0}}}{1}
+      {1}{{{\color{blue}1}}}{1}
+      {2}{{{\color{blue}2}}}{1}
+      {3}{{{\color{blue}3}}}{1}
+      {4}{{{\color{blue}4}}}{1}
+      {5}{{{\color{blue}5}}}{1}
+      {6}{{{\color{blue}6}}}{1}
+      {7}{{{\color{blue}7}}}{1}
+      {8}{{{\color{blue}8}}}{1}
+      {9}{{{\color{blue}9}}}{1}
+      {:}{{{\color{black}{:}}}}{1}
+      {,}{{{\color{black}{,}}}}{1}
+      {\{}{{{\color{codepurple}{\{}}}}{1}
+      {\}}{{{\color{codepurple}{\}}}}}{1}
+      {[}{{{\color{codepurple}{[}}}}{1}
+      {]}{{{\color{codepurple}{]}}}}{1},
+    stringstyle=\color{codegreen},
+    string=[s]{"}{"},
+}
+
+% ---------- Title ----------
+\title{\textbf{Tennis Ball Inspector: A Classic Computer Vision Pipeline \\
+for Automated Visual Defect Detection in Tennis Balls}}
+\author{Yuval Rubin \\
+\small Holon Instatute Of Technolegy}
+\date{June, 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\noindent
+This is a classical (non-deep-learning) computer vision system for automated
+visual quality inspection of tennis balls. Given a single reference (template)
+image of a new, defect-free ball and a runtime inspection image of a candidate
+ball, the system localizes the ball, corrects for rotation and scale, extracts
+a set of perceptually meaningful regions of interest (the printed logo
+characters, the felt patch, and the two seam lines), and compares each region
+against the reference using classical color and structural similarity
+measures. Defects are flagged automatically using user-configurable
+thresholds on: ball radius ratio, felt color difference (Earth Mover's
+Distance in CIELAB space), seam color difference, logo character color
+difference, and logo character structural difference (binary mask XOR after
+morphological filtering). The system was evaluated on five inspection images
+exhibiting different degrees and types of wear,
+compared against one reference image. Results show that the pipeline
+reliably separates lightly-used balls from heavily-worn ones, correctly
+localizes the artificial seam defect. The report includes quantitative results for all test imagesand outline the
+limitations and possible extensions of the system.
+\end{abstract}
+
+\vspace{0.3cm}
+\noindent\textbf{Keywords:} visual inspection, anomaly detection, classical
+computer vision, image registration, hough transform, CIELAB color space,
+Earth Mover's Distance, morphological filtering, histograms, OpenCV.
+
+\tableofcontents
+\newpage
+
+% ======================================================
+\section{Introduction}
+% ======================================================
+Automatic visual inspection - comparing an image of a manufactured or
+used object against a reference image of the same object in good condition is a classical task in industrial machine vision. Such systems are used to
+catch printing defects, surface damage, deformation, and color degradation
+without manual human inspection. The task is interesting precisely because
+the ``reference vs.\ inspection'' images are never pixel-aligned: the object
+may be rotated, translated or scaled, so a meaningful comparison requires a registration stage before any difference can be measured.
+
+This project implements such a system for a everyday object that exhibits
+rich, naturally-occurring wear patterns on a \textbf{tennis ball}. A tennis
+ball has several distinct, independently-checkable features:
+\begin{itemize}[noitemsep]
+    \item a roughly circular silhouette (easy to localize with a Hough
+    transform algorithm).
+    \item two seam lines that must remain horizontal and intact after
+    registration.
+    \item a printed multi-character logo whose individual characters can
+    degrade or disappear with wear.
+    \item a uniformly colored felt surface whose color fades with use.
+\end{itemize}
+
+The goal of the system is to take one reference image of a new ball and one
+inspection image of a candidate ball, and automatically report, per
+feature, whether the candidate is within tolerance of the reference --
+along with a numeric confidence/difference score for each feature.
+
+% ======================================================
+\section{Methods}
+% ======================================================
+
+\subsection{Pipeline Overview}
+
+The system follows a four-stage pipeline, illustrated schematically in
+Figure~\ref{fig:block_diagram}: (1) preprocessing and registration, which
+brings the inspection image into the same coordinate frame as the
+reference; (2) region-of-interest (ROI) extraction; (3) feature extraction,
+which converts each ROI into a compact numeric or histogram representation;
+and (4) comparison and decision, which measures the distance between
+reference and inspection features and thresholds each distance to produce a
+pass/fail verdict.
+
+\begin{figure}[H]
+\centering
+\fbox{\begin{minipage}{0.85\textwidth}
+\centering
+\vspace{0.3cm}
+\textbf{Reference Image} \hspace{2cm} \textbf{Inspection Image} \\
+\vspace{0.2cm}
+$\downarrow$ \hspace{4.3cm} $\downarrow$ \\
+\vspace{0.2cm}
+\fbox{\parbox{0.8\textwidth}{\centering \textbf{Stage 1 -- Preprocessing \& Registration} \\
+\small Hough circle detection $\to$ square crop $\to$ seam-line
+saturation thresholding $\to$ rotation alignment (seams horizontal)}}\\
+\vspace{0.3cm} $\downarrow$ \vspace{0.3cm}\\
+\fbox{\parbox{0.8\textwidth}{\centering \textbf{Stage 2 -- ROI Extraction} \\
+\small Felt patch ROI \quad | \quad Upper/lower seam ROI \quad | \quad
+Logo ROI $\to$ connected-component character segmentation}}\\
+\vspace{0.3cm} $\downarrow$ \vspace{0.3cm}\\
+\fbox{\parbox{0.8\textwidth}{\centering \textbf{Stage 3 -- Feature Extraction} \\
+\small CIELAB 2D color histograms (patch, seams, each character) \quad
+| \quad per-character binary shape mask \quad | \quad ball radius}}\\
+\vspace{0.3cm} $\downarrow$ \vspace{0.3cm}\\
+\fbox{\parbox{0.8\textwidth}{\centering \textbf{Stage 4 -- Comparison \& Decision} \\
+\small Earth Mover's Distance (color) \quad | \quad XOR + erosion (shape)
+\quad | \quad radius ratio \quad $\to$ threshold $\to$ pass/fail report}}\\
+\vspace{0.3cm}
+\end{minipage}}
+\caption{Block diagram of the inspection pipeline. The reference image is
+processed once at initialization; every inspection image is passed through
+the same four stages and compared against the cached reference features.}
+\label{fig:block_diagram}
+\end{figure}
+
+A key design decision is that \textbf{all reference-image features are
+computed once, when the system is initialized}, and cached. Every
+subsequent inspection image is processed through the identical pipeline and
+compared against this single cached reference, rather than recomputing the
+reference each time. 
+
+\newpage
+\subsection{Dataset}
+\label{sec:dataset}
+
+All images were captured by the author with a smartphone camera, photographing
+tennis balls from directly above (30 cm approx) against a uniform dark background, with the
+logo roughly centered in frame. The reference image and five inspection
+images used in this report are shown in the below figure:
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.32\textwidth}
+\includegraphics[width=\linewidth]{figs/template_new_ball.jpg}
+\caption{Reference: new ball}
+\end{subfigure}
+\begin{subfigure}{0.32\textwidth}
+\includegraphics[width=\linewidth]{figs/deform_R.jpg}
+\caption{deform\_R: filled 'R'}
+\end{subfigure}
+\begin{subfigure}{0.32\textwidth}
+\includegraphics[width=\linewidth]{figs/deform_lines.jpg}
+\caption{deform\_lines: marked seams}
+\end{subfigure}
+
+\vspace{0.3cm}
+\begin{subfigure}{0.32\textwidth}
+\includegraphics[width=\linewidth]{figs/deform_L_N_Symbol.jpg}
+\caption{deform\_L\_N\_Symbol: dark blue 'L', 'N'}
+\end{subfigure}
+\begin{subfigure}{0.32\textwidth}
+\includegraphics[width=\linewidth]{figs/1.5h.jpg}
+\caption{1.5h: moderate-heavy use}
+\end{subfigure}
+\begin{subfigure}{0.32\textwidth}
+\includegraphics[width=\linewidth]{figs/3h.jpg}
+\caption{3h: heavy use}
+\end{subfigure}
+\end{figure}
+
+\begin{itemize}
+    \item The \texttt{1.5h} and \texttt{3h} images (named for approximate hours of play) show naturally occurring wear:
+    \begin{itemize}
+        \item The printed logo is partially worn away
+        \item The felt color is visibly faded compared to the reference
+    \end{itemize}
+
+    \item The \texttt{deform\_lines} image is a new ball with small artificial marks added along the seam lines, used as a controlled, repeatable test of the seam-comparison feature.
+
+    \item The \texttt{deform\_R} image shows a new ball where the hollow part of the letter ``R'' was filled in black color.
+
+    \item The \texttt{deform\_L\_N\_Symbol} image shows a new ball where the letters ``L'' and ``N'' were colored in dark blue.
+\end{itemize}
+
+\subsection{Stage 1: Preprocessing and Registration}
+
+\paragraph{Ball localization.} The ball is localized using the Hough
+Circle Transform (\texttt{cv2.HoughCircles}) applied to a Gaussian-blurred
+grayscale version of the image. The algorithm first applies edge-detection
+operators (gradient-based kernels) to identify strong intensity transitions in
+the image, which correspond to potential object boundaries. These edge points
+are then used in a voting scheme where each point contributes votes in a
+parameter space of possible circle centers and radii. The accumulator collects
+these votes across all candidates, and the highest-scoring peak is selected as
+the most likely hypothesis for the ball, yielding its center and radius
+(Figure~\ref{fig:hough}).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{figs/hough_circle_example.png}
+\caption{Hough Circle Transform output on the reference image. The detected
+circle (green) is used to center the subsequent square crop.}
+\label{fig:hough}
+\end{figure}
+
+\paragraph{Cropping.} A fixed-size square region centered on the detected
+ball is cropped from the original image (zero-padding is applied if the
+crop would exceed the image boundary). This produces a consistent
+coordinate frame in which all subsequent ROI coordinates (expressed as
+fractions of image width/height in the configuration file) are valid
+regardless of the ball's original position or scale in the source photo.
+
+\paragraph{Rotation correction (registration).} Tennis balls can be
+photographed at an arbitrary rotation. To register
+the inspection image to the reference orientation, the two felt seam lines
+are detected by thresholding the saturation channel of the HSV color space
+(the white/gray seams have markedly lower saturation than the surrounding
+yellow felt).
+
+To improve robustness, the binary saturation mask is first smoothed using a
+Gaussian filter and then refined through morphological opening with a
+strongly anisotropic horizontal structuring element (a $50 \times 2$
+rectangular kernel). This kernel suppresses isolated noise and preserves
+elongated horizontal structures corresponding to seam lines, while removing
+small vertical or blob-like artifacts introduced by the fuzzy felt texture (see Figure~\ref{fig:seammask}).
+
+A best-fit line is computed through the remaining seam-line pixels
+(\texttt{cv2.fitLine}), giving an estimated rotation angle for the upper and
+lower seam independently; the two estimates are averaged and the whole image
+(plus both seam masks) is rotated by the negative of this angle so that both
+seams become approximately horizontal.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.45\textwidth]{figs/seam_line_bin.png}
+\caption{Binary mask obtained after saturation thresholding and refinement using a horizontal morphological kernel.}
+\label{fig:seammask}
+\end{figure}
+
+\subsection{Stage 2: Region-of-Interest Extraction}
+
+After registration, three ROIs are extracted from fixed, configurable
+fractional coordinates of the registered crop:
+
+\begin{itemize}
+\item \textbf{Felt patch ROI}: a rectangular strip of plain felt (away
+from the seams and logo), used to characterize the overall ball color.
+\item \textbf{Seam ROIs}: the upper and lower seam-line search bands
+(also reused from the registration step).
+\item \textbf{Logo ROI}: a central rectangular band thresholded (dark-ink
+binary mask via grayscale thresholding) and cleaned with a morphological
+\emph{closing} operation (a vertical structuring element bridges small
+gaps within each printed character - caused by the ball felt).
+\end{itemize}
+
+\paragraph{Character segmentation.} The cleaned logo binary mask
+(Figure~\ref{fig:logomask}) is segmented into individual connected
+components (\texttt{cv2.connectedComponentsWithStats}); components smaller
+than an area threshold are discarded as noise. The remaining components
+are sorted by row, then by horizontal position within each row, giving a
+consistent left-to-right, top-to-bottom ordering of characters that is
+comparable between the reference and any inspection image -- \emph{provided
+the same number of characters is detected in both}. This character count
+agreement is itself reported as a binary pass/fail feature, since a
+mismatch indicates the logo has degraded enough that letters have merged,
+disappeared, or split into fragments.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.45\textwidth]{figs/logo_bin_mask.png}
+\caption{Cleaned binary logo mask after grayscale thresholding and
+morphological closing, ready for connected-component character
+segmentation.}
+\label{fig:logomask}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/pipeline_montage.png}
+\caption{Full preprocessing pipeline applied to the reference image, panel
+by panel: (1) circle detection, (2) crop, (3) seam binary mask used for
+angle estimation, (4) registered (rotated) crop, (5) logo binary mask, (6)
+segmented logo characters with bounding boxes, (7) extracted felt patch,
+(8) seam ROI bounding boxes overlaid on the registered image.}
+\label{fig:pipeline}
+\end{figure}
+
+\subsection{Stage 3: Feature Extraction}
+
+\paragraph{Color signatures.} For each color-relevant ROI (patch, upper
+seam, lower seam, and each logo character), the system computes a 2D color
+histogram in CIELAB space over the Lightness ($L^{*}$) and Blue/Yellow
+($b^{*}$) channels (100 $\times$ 100 bins, $L^{1}$-normalized). CIELAB was
+chosen over RGB because its $L^{*}$ and $b^{*}$ axes more directly capture
+the two failure modes of interest in this object -- felt darkening/fading
+(lightness) and yellow-to-green color shift (blue/yellow axis) -- while
+being more perceptually uniform than raw RGB differences. This 2D
+histogram is referred to in the code and in this report as the ROI's
+\emph{color signature}.
+
+\paragraph{Structural (shape) signatures.} For each segmented logo
+character, the raw binary mask is kept (cropped to its bounding box) as the
+character's structural signature. To compare two characters' shapes, the
+inspection character's mask is first translated (not rotated or scaled) so
+that its centroid aligns with the corresponding reference character's
+centroid -- this assumes residual misalignment after Stage~1 is small and
+purely translational, which held in practice for our dataset.
+
+\paragraph{Radius.} The Hough-detected radius of the inspection ball is
+retained as a single scalar feature.
+
+\subsection{Stage 4: Comparison and Decision}
+
+\paragraph{Color difference -- Earth Mover's Distance.} Two color
+signatures (reference vs. inspection, for the same ROI) are compared using
+the Earth Mover's Distance, EMD.
+computed via \texttt{cv2.EMD} on a sparse signature representation of each
+histogram. EMD was chosen over a simpler bin-wise distance (e.g Bhattacharyya) because it is robust to small shifts of the
+color distribution -- relevant here, since felt fading shifts the entire
+color cluster rather than redistributing mass within fixed bins. The raw
+EMD value is normalized by the maximum possible distance between any two
+bins ($\sqrt{2} \cdot (\text{bins}-1)$) and clipped to $[0, 1]$, giving a
+ROI color difference score that is comparable across ROIs and images.
+
+\paragraph{Structural difference -- masked XOR.} Two aligned character
+masks are compared with a pixel-wise logical XOR, producing a raw
+difference map. This map is then passed through a morphological
+\emph{erosion} with a $12\times12$ kernel: this acts as a noise filter,
+removing thin, isolated XOR-difference pixels caused by minor edge jitter
+from segmentation/alignment while preserving larger, contiguous regions of
+genuine shape disagreement. The remaining nonzero pixel count, normalized by mask
+area, is the character's structural difference score.
+
+\paragraph{Thresholding.} Table~\ref{tab:thresholds} lists the final
+decision thresholds, set empirically by the authors after inspecting score
+distributions on the reference image and the worn-ball examples.
+
+\begin{table}[H]
+\centering
+\caption{Decision thresholds for "TRETORN SERIE + CONTROL" balls (from
+\texttt{config/tretorn\_serie\_plus\_control.json}).}
+\label{tab:thresholds}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Feature} & \textbf{Threshold} & \textbf{Pass condition} \\
+\midrule
+Ball radius ratio & $[0.95,\ 1.05]$ & ratio within range \\
+Felt patch color difference (EMD) & $0.02$ & difference $\le$ threshold \\
+Seam color difference (EMD, avg.\ of both seams) & $0.04$ & difference $\le$ threshold \\
+Logo character color difference (EMD), per character & $0.035$ & difference $\le$ threshold \\
+Logo character structural difference, per character & $0.005$ & difference $\le$ threshold \\
+Character count & exact match & detected count == reference count \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All thresholds, ROI coordinates, and the ball radius search range are
+externalized to a single JSON configuration file, so the system can be
+re-tuned for a different ball model (e.g.\ a different logo or felt color)
+without code changes.
+
+\subsection{Implementation}
+
+The system is implemented in Python 3 using OpenCV for all image
+processing and NumPy for array operations; Matplotlib is used only for the
+optional visualization dashboard, not for any inspection decision. The
+codebase is organized into four modules (\texttt{Preprocessor},
+\texttt{ColorExtractor}, \texttt{FeatureExtractor}, \texttt{BallInspector})
+described in full in Appendix~A, with the orchestration logic in
+\texttt{ball\_inspector.py}. No machine-learning models, training data, or
+deep-learning libraries are used anywhere in the pipeline; every step is a
+classical image-processing operation (thresholding, Hough transform,
+connected components, morphological filtering, histogram comparison).
+
+% ======================================================
+\section{Results}
+% ======================================================
+
+The system (initialized once on \texttt{template\_new\_ball.jpg}) was run
+on all five inspection images described in Section~\ref{sec:dataset}, plus
+a sanity check in which the reference image was compared against itself.
+Table~\ref{tab:results} reports the full numeric output for every image;
+Figure~\ref{fig:results_bars} visualizes the same data against the decision
+thresholds.
+
+\begin{table}[H]
+\centering
+\caption{Quantitative results across all test images. Bold values exceed the corresponding threshold from Table~\ref{tab:thresholds} (i.e.\ flagged as defective on that feature).
+\\ ``Max char color'' / ``Max char struct.'' report the worst single character out of all detected characters.}
+\label{tab:results}
+\small
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+\textbf{Image} & \textbf{Radius} & \textbf{Patch} & \textbf{Seam} &
+\textbf{\# Chars} & \textbf{Max char} & \textbf{Max char} \\
+& \textbf{ratio} & \textbf{color diff.} & \textbf{color diff.} &
+\textbf{(ref.\,=\,15)} & \textbf{color diff.} & \textbf{struct.\ diff.} \\
+\midrule
+template (self-test) & 1.000 & 0.000 & 0.000 & 15 & 0.000 & 0.000 \\
+deform\_R & 1.005 & 0.013 & 0.018 & 15 & 0.025 & \textbf{0.0059} \\
+deform\_lines & 1.017 & 0.017 & \textbf{0.084} & 15 & 0.032 & 0.0022 \\
+deform\_L\_N\_Symbol & 0.997 & 0.010 & 0.017 & \textbf{14} & \textbf{0.047} & \textbf{0.1655} \\
+1.5h & 0.994 & \textbf{0.023} & \textbf{0.050} & \textbf{14} & \textbf{0.195} & \textbf{0.354} \\
+3h & 1.030 & \textbf{0.025} & \textbf{0.043} & 15 & \textbf{0.204} & \textbf{0.440} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/results_bars.png}
+\caption{Left: patch and average seam color difference (EMD) per image,
+against their respective thresholds. Right: worst-case (maximum) logo
+character color and structural difference per image, against their
+thresholds. Heavily worn balls (\texttt{1.5h}, \texttt{3h}) clearly exceed
+nearly every threshold.}
+\label{fig:results_bars}
+\end{figure}
+
+\newpage
+\subsection{Qualitative example: moderate wear (1.5h)}
+
+Figure~\ref{fig:1_5h_crop} presents the cropped images of the reference ball alongside the \texttt{1.5h} inspection ball for direct comparison. Signs of wear, such as felt fading and partial logo degradation, are already noticeable to the naked eye.
+
+Figure~\ref{fig:1_5h_maps} illustrates the complete inspection dashboard, while Figure~\ref{fig:1_5h_terminal} shows the corresponding terminal output.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/headtohead_1_5h.png}
+\caption{Reference (left) and \texttt{1.5h} inspection ball (right).}
+\label{fig:1_5h_crop}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/1_5h_maps.png}
+\caption{Inspection dashboard for the \texttt{1.5h} ball. Top row: felt-patch and seam color histograms (template vs.\ runtime). Middle row: per-character color histograms. Bottom row: segmented logo character masks with corresponding pixel counts.}
+\label{fig:1_5h_maps}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.72\textwidth]{figs/1_5h_terminal_output.png}
+\caption{Terminal output for \texttt{1.5h}: failed checks are shown in red, while passed checks are shown in green.}
+\label{fig:1_5h_terminal}
+\end{figure}
+
+
+\newpage
+\subsection{Qualitative example: filled logo character (deform\_R)}
+
+Figure~\ref{fig:deform_R_crop} places the reference and \texttt{deform\_R}
+crops side by side.  The filled hollow of the ``R'' is discernible but the
+overall ball appearance is otherwise identical, illustrating why global
+metrics alone would miss this defect.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/headtohead_deform_R.png}
+\caption{Reference (left) vs.\ \texttt{deform\_R} inspection ball (right).}
+\label{fig:deform_R_crop}
+\end{figure}
+
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/deform_R_maps.png}
+\caption{Inspection dashboard for \texttt{deform\_R}.  The patch and seam
+spectra are clean; the structural anomaly is confined to the single modified
+character (Char~5, the letter ``R'').}
+\label{fig:deform_R_maps}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.72\textwidth]{figs/deform_R_terminal_output.png}
+\caption{Terminal output for \texttt{deform\_R}: failed checks are shown in red, while passed checks are shown in green.}
+\label{fig:deform_R_terminal}
+\end{figure}
+
+\newpage
+\subsection{Qualitative example: recolored characters (deform\_L\_N\_Symbol)}
+
+Figure~\ref{fig:LN_crop} shows the reference and \texttt{deform\_L\_N\_Symbol}
+crops side by side.  The dark-blue ``L'' and ``N'' characters are clearly
+visible against the yellow felt, while the rest of the logo and the felt
+itself appear unchanged.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/headtohead_deform_L_N.png}
+\caption{Reference (left) vs.\ \texttt{deform\_L\_N\_Symbol} inspection ball (right).}
+\label{fig:LN_crop}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/L_N_maps.png}
+\caption{Inspection dashboard for \texttt{deform\_L\_N\_Symbol}.  The patch
+and seam spectra are clean, but the character-level masks reveal the
+recolored letters through anomalous color and structure differences and a
+reduced character count.}
+\label{fig:LN_maps}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.72\textwidth]{figs/L_N_terminal_output.png}
+\caption{Terminal output for \texttt{deform\_L\_N\_Symbol} failed checks are shown in red, while passed checks are shown in green.}
+\label{fig:LN_terminal}
+\end{figure}
+
+\newpage
+\subsection{Qualitative example: artificial seam marks (deform\_lines)}
+
+Figure~\ref{fig:seam_lines_crop} shows the reference and
+\texttt{deform\_lines} crops side by side.  The small marks along the seam
+lines are subtle enough that the logo and felt color appear identical to the
+reference — yet the seam comparison module catches them clearly.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/headtohead_deform_lines.png}
+\caption{Reference (left) vs.\ \texttt{deform\_lines} inspection ball (right).
+Small artificial marks have been added along both seam lines; the logo and
+felt are otherwise undamaged.}
+\label{fig:seam_lines_crop}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/seam_lines_maps.png}
+\caption{Inspection dashboard for \texttt{deform\_lines}.  The runtime seam
+histograms are clearly broader than their
+template counterparts, while the character masks (bottom row) are
+indistinguishable from a new ball.}
+\label{fig:seam_lines_maps}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.72\textwidth]{figs/seam_lines_terminal_output.png}
+\caption{Terminal output for \texttt{deform\_lines}: failed checks are shown in red, while passed checks are shown in green.}
+\label{fig:seam_lines_terminal}
+\end{figure}
+
+\newpage
+% ======================================================
+\section{Discussion and Conclusions}
+% ======================================================
+
+The pipeline separates clearly-defective tennis balls (heavy wear,
+artificially marked seams, recolored or filled logo characters) from a
+clean reference using only classical image processing, with no learned
+models or training data. Its main practical strength is the per-feature,
+per-ROI decomposition: a human reviewer can see \emph{which} aspect of the
+ball failed, rather than reading one opaque anomaly score. The results in
+Table~\ref{tab:results} show this working as intended -- seam marks raise
+only the seam score, heavy wear raises patch, seam, and character scores
+together, and the filled/recolored characters raise character-level scores
+specifically. 
+
+\subsection{Limitations}
+
+\begin{itemize}
+\item \textbf{Fixed ROI coordinates assume consistent framing.} All ROIs
+use fixed fractional coordinates of the registered crop, assuming
+top-down framing similar to the reference; a steeper angle or a
+differently-printed ball would misalign them even after registration. This
+same rigidity also means defects outside the defined ROIs go unchecked
+entirely -- the small blue/yellow fleck near the ``T'' in
+\texttt{deform\_L\_N\_Symbol} falls just outside the first character's
+bounding box, so its color was never sampled at all, independent of any
+threshold setting.
+\end{itemize}
+
+\subsection{Possible Extensions}
+Two natural directions emerge for extending this work.
+
+\paragraph{Classical Computer Vision.}
+Deriving reference color signatures from multiple clean-ball images
+rather than a single one would improve robustness to lighting variation
+and reduce sensitivity to the choice of reference frame.
+
+\paragraph{Deep Learning.}
+The pipeline could serve as a structured feature extractor -- feeding
+it into a lightweight neural architecture
+trained end-to-end to classify defect types, allowing the system to
+learn discriminative thresholds directly from labeled data rather than
+relying on manual calibration.
+
+\subsection{Conclusion}
+
+This project shows that a classical pipeline -- Hough-transform
+localization, saturation-based seam registration, CIELAB color histograms
+compared via Earth Mover's Distance, and morphologically-filtered
+structural XOR -- reliably distinguishes clean and worn tennis balls and
+correctly localizes most introduced defects to the right feature, while
+remaining fully interpretable at every stage. Its main weakness, missing a
+heavily faded color defect, is a direct consequence of fixed,
+manually-set thresholds rather than a flaw in the underlying approach.
+
+% ======================================================
+\appendix
+\newpage
+\section{Source Code}
+% ======================================================
+
+The full source code is also available at:
+\url{https://github.com/yuvalrubinil/tennis-ball-inspector}.
+
+\subsection{\texttt{preprocessor.py} -- Detection, Registration, ROI Extraction}
+\lstinputlisting[language=Python]{code/preprocessor.py}
+
+\newpage
+\subsection{\texttt{color\_extractor.py} -- CIELAB Color Signatures}
+\lstinputlisting[language=Python]{code/color_extractor.py}
+
+\newpage
+\subsection{\texttt{feature\_extractor.py} -- Feature Comparison Logic}
+\lstinputlisting[language=Python]{code/feature_extractor.py}
+
+\newpage
+\subsection{\texttt{ball\_inspector.py} -- Orchestration and Reporting}
+\lstinputlisting[language=Python]{code/ball_inspector.py}
+
+\newpage
+\subsection{Configuration File}
+\lstinputlisting[language=json]{code/config.json}
+
+\end{document}
