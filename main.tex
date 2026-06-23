@@ -82,7 +82,7 @@
 \title{\textbf{Tennis Ball Inspector: A Classic Computer Vision Pipeline \\
 for Automated Visual Defect Detection in Tennis Balls}}
 \author{Yuval Rubin \\
-\small Holon Instatute Of Technolegy}
+\small Holon Institute of Technology}
 \date{June, 2026}
 
 \begin{document}
@@ -94,7 +94,7 @@ for Automated Visual Defect Detection in Tennis Balls}}
 This is a classical (non-deep-learning) computer vision system for automated
 visual quality inspection of tennis balls. Given a single reference (template)
 image of a new, defect-free ball and a runtime inspection image of a candidate
-ball, the system localizes the ball, corrects for rotation and scale, extracts
+ball, the system localizes the ball, corrects the rotation, extracts
 a set of perceptually meaningful regions of interest (the printed logo
 characters, the felt patch, and the two seam lines), and compares each region
 against the reference using classical color and structural similarity
@@ -106,7 +106,7 @@ morphological filtering). The system was evaluated on five inspection images
 exhibiting different degrees and types of wear,
 compared against one reference image. Results show that the pipeline
 reliably separates lightly-used balls from heavily-worn ones, correctly
-localizes the artificial seam defect. The report includes quantitative results for all test imagesand outline the
+localizes the artificial defects. The report includes quantitative results for all test images and outline the
 limitations and possible extensions of the system.
 \end{abstract}
 
@@ -260,7 +260,7 @@ grayscale version of the image. The algorithm first applies edge-detection
 operators (gradient-based kernels) to identify strong intensity transitions in
 the image, which correspond to potential object boundaries. These edge points
 are then used in a voting scheme where each point contributes votes in a
-parameter space of possible circle centers and radii. The accumulator collects
+parameter space of possible circle centers and radius. The accumulator collects
 these votes across all candidates, and the highest-scoring peak is selected as
 the most likely hypothesis for the ball, yielding its center and radius
 (Figure~\ref{fig:hough}).
@@ -329,8 +329,7 @@ components (\texttt{cv2.connectedComponentsWithStats}); components smaller
 than an area threshold are discarded as noise. The remaining components
 are sorted by row, then by horizontal position within each row, giving a
 consistent left-to-right, top-to-bottom ordering of characters that is
-comparable between the reference and any inspection image -- \emph{provided
-the same number of characters is detected in both}. This character count
+comparable between the reference and any inspection image. This character count
 agreement is itself reported as a binary pass/fail feature, since a
 mismatch indicates the logo has degraded enough that letters have merged,
 disappeared, or split into fragments.
@@ -350,8 +349,7 @@ segmentation.}
 \caption{Full preprocessing pipeline applied to the reference image, panel
 by panel: (1) circle detection, (2) crop, (3) seam binary mask used for
 angle estimation, (4) registered (rotated) crop, (5) logo binary mask, (6)
-segmented logo characters with bounding boxes, (7) extracted felt patch,
-(8) seam ROI bounding boxes overlaid on the registered image.}
+segmented logo characters with bounding boxes, (7) extracted felt patch.}
 \label{fig:pipeline}
 \end{figure}
 
@@ -370,11 +368,11 @@ histogram is referred to in the code and in this report as the ROI's
 
 \paragraph{Structural (shape) signatures.} For each segmented logo
 character, the raw binary mask is kept (cropped to its bounding box) as the
-character's structural signature. To compare two characters' shapes, the
+character's \emph{structural signature}. To compare two characters' shapes, the
 inspection character's mask is first translated (not rotated or scaled) so
 that its centroid aligns with the corresponding reference character's
 centroid -- this assumes residual misalignment after Stage~1 is small and
-purely translational, which held in practice for our dataset.
+purely translational, which held in practice for the dataset.
 
 \paragraph{Radius.} The Hough-detected radius of the inspection ball is
 retained as a single scalar feature.
@@ -402,7 +400,7 @@ genuine shape disagreement. The remaining nonzero pixel count, normalized by mas
 area, is the character's structural difference score.
 
 \paragraph{Thresholding.} Table~\ref{tab:thresholds} lists the final
-decision thresholds, set empirically by the authors after inspecting score
+decision thresholds, set empirically after inspecting score
 distributions on the reference image and the worn-ball examples.
 
 \begin{table}[H]
@@ -536,7 +534,7 @@ metrics alone would miss this defect.
 \centering
 \includegraphics[width=\textwidth]{figs/deform_R_maps.png}
 \caption{Inspection dashboard for \texttt{deform\_R}.  The patch and seam
-spectra are clean; the structural anomaly is confined to the single modified
+histograms are clean; the structural anomaly is confined to the single modified
 character (Char~5, the letter ``R'').}
 \label{fig:deform_R_maps}
 \end{figure}
@@ -567,7 +565,7 @@ itself appear unchanged.
 \centering
 \includegraphics[width=\textwidth]{figs/L_N_maps.png}
 \caption{Inspection dashboard for \texttt{deform\_L\_N\_Symbol}.  The patch
-and seam spectra are clean, but the character-level masks reveal the
+and seam histograms are clean, but the character-level masks reveal the
 recolored letters through anomalous color and structure differences and a
 reduced character count.}
 \label{fig:LN_maps}
@@ -619,29 +617,29 @@ indistinguishable from a new ball.}
 \section{Discussion and Conclusions}
 % ======================================================
 
-The pipeline separates clearly-defective tennis balls (heavy wear,
-artificially marked seams, recolored or filled logo characters) from a
+The pipeline separates clearly-defective tennis balls (ball wear,
+artificially marked defects) from a
 clean reference using only classical image processing, with no learned
 models or training data. Its main practical strength is the per-feature,
-per-ROI decomposition: a human reviewer can see \emph{which} aspect of the
-ball failed, rather than reading one opaque anomaly score. The results in
+per-ROI decomposition: a human reviewer can see which aspect of the
+ball failed. The results in
 Table~\ref{tab:results} show this working as intended -- seam marks raise
 only the seam score, heavy wear raises patch, seam, and character scores
 together, and the filled/recolored characters raise character-level scores
 specifically. 
 
 \subsection{Limitations}
-
 \begin{itemize}
 \item \textbf{Fixed ROI coordinates assume consistent framing.} All ROIs
 use fixed fractional coordinates of the registered crop, assuming
 top-down framing similar to the reference; a steeper angle or a
-differently-printed ball would misalign them even after registration. This
-same rigidity also means defects outside the defined ROIs go unchecked
-entirely -- the small blue/yellow fleck near the ``T'' in
-\texttt{deform\_L\_N\_Symbol} falls just outside the first character's
-bounding box, so its color was never sampled at all, independent of any
-threshold setting.
+differently-printed ball would misalign them even after registration.
+
+\item \textbf{ROI rigidity leaves defects outside defined regions unchecked.}
+Defects that fall outside the defined ROIs are never sampled, regardless of
+any threshold setting -- the small blue/yellow fleck near the ``T'' in
+\texttt{deform\_L\_N\_Symbol}, for instance, falls just outside the first
+character's bounding box and was therefore never compared against the reference.
 \end{itemize}
 
 \subsection{Possible Extensions}
@@ -666,9 +664,9 @@ localization, saturation-based seam registration, CIELAB color histograms
 compared via Earth Mover's Distance, and morphologically-filtered
 structural XOR -- reliably distinguishes clean and worn tennis balls and
 correctly localizes most introduced defects to the right feature, while
-remaining fully interpretable at every stage. Its main weakness, missing a
-heavily faded color defect, is a direct consequence of fixed,
-manually-set thresholds rather than a flaw in the underlying approach.
+remaining fully interpretable at every stage. Its main weakness, missing the small blue/yellow fleck near the ``T'' in
+\texttt{deform\_L\_N\_Symbol}, is a direct consequence of fixed,
+manually-set ROI framing.
 
 % ======================================================
 \appendix
